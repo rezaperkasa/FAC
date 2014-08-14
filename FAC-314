@@ -1,0 +1,749 @@
+#include <UTFT.h>                
+#include <UTouch.h>        
+#include <EEPROM.h>
+#include <dht.h>
+
+
+//LCD
+UTFT myGLCD(ITDB32S,38,39,40,41);  //pins used for TFT
+UTouch  myTouch(6,5,4,3,2);  //pins used for Touch
+int page = 0, x = 0, y = 0;  
+
+//----pilih warna----    
+int color = 0;
+word colorlist[] = {VGA_WHITE, VGA_BLACK, VGA_RED, VGA_BLUE, VGA_GREEN, VGA_FUCHSIA, VGA_YELLOW, VGA_AQUA};
+
+//----pilih font-----
+extern uint8_t BigFont[];        
+extern uint8_t SmallFont[];
+extern uint8_t SevenSegNumFont[];
+extern uint8_t SevenSegmentFull[];
+extern uint8_t UbuntuBold[];
+extern uint8_t SevenSeg_XXXL_Num[];
+//extern uint16_t logo_reza[];
+
+//pin humidity
+#define DHT22_PIN A7
+dht DHT;
+
+
+//......DHT........
+float TempDhtF, TempDhtC, oldDhtC, oldRealHum;
+//......DHT........
+
+//define Pinout;
+int steps[]= {8,9,10,11, 42, 43, 44, 45, 46, 47, 48, 49, 50,51,52,53 };
+int jmlStep = 16;
+
+//---- Humidity -------
+//int portHum = 2;
+int rhsense;
+int RealHum, OldRealHum;
+//---- Humidity -------
+
+int entrySuhu[16], oldEntrySuhu = 0;
+int setPointRH = 0, jarakPointRH = 0, oldJarakPointRH = 0, oldSetPointRH = 0;
+
+// kotak
+int boxHome[] = {0, 210, 69, 239 };
+int boxSetting[] = {70, 210, 139, 239 };
+int boxTest[] = {258, 210, 319, 239 };
+int boxBar[] = {0, 210, 319, 239 };
+int boxSave[] = {180, 210, 251, 239 };
+int boxCancel[] = {250, 210, 319, 239 };
+int box1Step[] = {289, 199, 319, 211};
+int box1TextStep[] = {258, box1Step[1], 288, box1Step[3]}; 
+int boxAngkaAtas[] = {35, 50, 205, 120};
+int boxAngkaBwh[] = {35, 122, 205, 192};
+int boxPlusAtas[] = {210, 50, 235, 80 };
+int boxMinAtas[] = {210, 90, 235, 120 };
+int boxPlusBwh[] = {210, 122, 235, 152 };
+int boxMinBwh[] = {210, 162, 235, 192 };
+int box2Step[] = {36, 160, 76, 195};
+int box2TextStep[] = {5, box2Step[1], 35, box2Step[3]}; 
+int tinggiBoxStep = box1Step[3]-box1Step[1];
+int tinggiBoxStep2 = box2Step[3]-box2Step[1];
+
+//lain 
+int jmlReadTemp = 0;
+int oldDigital[8], langkahSet = 0, firstTime = 0;
+int nilaiInputSuhu = 0, nilaiInputSetPoint = 0, nilaiInputJarakPoint = 0;
+
+void setup() {
+  Serial.begin(9600);
+  
+  initLCD();
+  bacaEEPROM();
+  menuBawah();
+  menuKanan();
+  checkPinMode();
+  //checkSystem();
+}
+
+void loop() {
+  checkTempRH();
+  cetakLCD();
+  
+  checkKondisi();
+  checkDigital();
+  
+  checkInputan();
+  
+  delay(10);
+}
+
+void initLCD()
+{
+  myGLCD.InitLCD(LANDSCAPE);
+  myGLCD.clrScr();
+  myTouch.InitTouch(LANDSCAPE);
+  myTouch.setPrecision(PREC_HI);
+  
+  page = 0;
+  myGLCD.fillScr(VGA_AQUA);
+  myGLCD.setBackColor (VGA_AQUA);
+  
+}
+
+void menuBawah()
+{
+  //kotak bawah
+  boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxBar[0], boxBar[1], boxBar[2], boxBar[3], ""); 
+  boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxHome[0], boxHome[1], boxHome[2], boxHome[3], "HOME"); 
+  if (page ==0)
+  {
+    int facY1 = 5, facY2 = 35;
+    boxUbuntuFont(VGA_FUCHSIA, VGA_FUCHSIA, VGA_BLACK, 
+                  20, facY1, boxAngkaAtas[2] + 40, facY2, "FAC  3.14" ); 
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                boxHome[2], boxHome[1], boxTest[0], boxHome[3], "FARM AUTO CONTROL 3.14"); 
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxTest[0], boxTest[1], boxTest[2], boxTest[3], "TEST"); 
+  }
+  else if (page == 1)
+  {
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                boxHome[2], boxHome[1], boxTest[0], boxHome[3], "FARM AUTO CONTROL 3.14"); 
+  }
+  else if (page >= 2)
+  {
+    if (page == 2)
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                boxHome[2], boxHome[1], boxSave[0], boxHome[3], "Humidity"); 
+
+    if (page > 2)
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                boxHome[2], boxHome[1], boxSave[0], boxHome[3], "STEP "+String(langkahSet)); 
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxSave[0], boxSave[1], boxSave[2], boxSave[3], "SAVE"); 
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxCancel[0], boxCancel[1], boxCancel[2], boxCancel[3], "CANCEL"); 
+  }
+}
+
+void menuKanan()
+{
+  int y1 = box1Step[1], y2 = box1Step[3];
+  boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                  box1Step[0], y1, box1Step[2], y2, String(setPointRH) ); 
+  boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                  box1TextStep[0], y1, box1TextStep[2], y2, "RH"); 
+
+  for (int iz=1; iz<= 15; iz++)
+  {
+    y1 -= tinggiBoxStep;
+    y2 -= tinggiBoxStep;
+    
+    boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                 box1Step[0], y1, box1Step[2], y2, String(entrySuhu[iz]) ); 
+    boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                  box1TextStep[0], y1, box1TextStep[2], y2, "S"+String(iz)); 
+  }
+}
+
+
+void checkPinMode()
+{
+  DHT.read22(DHT22_PIN);
+ 
+  for (int x=0; x <= 15; x++)
+  {
+    pinMode(steps[x], OUTPUT);
+  }
+}
+
+void checkSystem()
+{
+  int y1 = box1Step[1], y2 = box1Step[3];
+
+  for (int i=0; i<= 15; i++)
+  {
+    digitalWrite(steps[i], HIGH); 
+    if (i == 0)
+    {
+      boxSmallFont(VGA_BLACK, VGA_RED, VGA_BLUE, 
+                    box1Step[0], y1, box1Step[2], y2, String(setPointRH) ); 
+    }
+    else
+    {
+      y1 -= tinggiBoxStep;
+      y2 -= tinggiBoxStep;
+    
+      boxSmallFont(VGA_BLACK, VGA_RED, VGA_BLUE, 
+                 box1Step[0], y1, box1Step[2], y2, String(entrySuhu[i]) ); 
+    }
+    delay(500);
+  }  
+
+  y1 = box1Step[1]; y2 = box1Step[3];
+  
+  for (int i=0; i<= 15; i++)
+  {
+    digitalWrite(steps[i], LOW); 
+     if (i == 0)
+    {
+      boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                    box1Step[0], y1, box1Step[2], y2, String(setPointRH) ); 
+    }
+    else
+    {
+      y1 -= tinggiBoxStep;
+      y2 -= tinggiBoxStep;
+    
+      boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                   box1Step[0], y1, box1Step[2], y2, String(entrySuhu[i]) ); 
+    }
+    delay(500);
+  }  
+}
+
+
+void bacaEEPROM()
+{
+  for (int i=1; i<=15; i++)
+  {
+    entrySuhu[i] = EEPROM.read(21+i);
+    if (entrySuhu[i] > 100) entrySuhu[i] = 0;
+  }  
+  setPointRH = EEPROM.read(81);
+  if (setPointRH > 100) setPointRH = 50;
+  jarakPointRH = EEPROM.read(82);
+  if (jarakPointRH > 100) jarakPointRH = 10;
+}
+
+void checkTempRH()
+{ 
+ if (jmlReadTemp >= 10)
+ {
+  DHT.read22(DHT22_PIN);
+  TempDhtC = DHT.temperature;
+  TempDhtF = (TempDhtC*9+2)/5+32;
+  RealHum = DHT.humidity;
+  jmlReadTemp = 0;  
+  
+  if (TempDhtC > 200) TempDhtC = 1;
+  if (TempDhtF > 200) TempDhtF = 1;
+  if (RealHum > 200) RealHum = 1;
+  
+  
+ }
+  jmlReadTemp += 1;
+}
+
+void cetakLCD()
+{
+  //Serial.println(page);
+ if (page == 0)
+ { 
+  if (oldDhtC != TempDhtC)
+  {
+    box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+           boxAngkaAtas[0], boxAngkaAtas[1], boxAngkaAtas[2], boxAngkaAtas[3], String(TempDhtC) ); 
+    boxUbuntuFont(VGA_AQUA, VGA_AQUA, VGA_RED, 
+                  210, 53, 240, 123, "C" ); 
+    oldDhtC = TempDhtC;
+    //Serial.println(page);
+  }
+  
+  if (oldRealHum != RealHum)
+  {
+    box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+            boxAngkaBwh[0], boxAngkaBwh[1], boxAngkaBwh[2], boxAngkaBwh[3], String(RealHum)); 
+    boxUbuntuFont(VGA_AQUA, VGA_AQUA, VGA_RED, 
+                  210, 125, 240, 200, "%" ); 
+    oldRealHum = RealHum;       
+  }
+ } 
+ 
+ else if (page == 2) // rh
+ {
+   if (nilaiInputSetPoint != setPointRH)
+    box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+            boxAngkaAtas[0], boxAngkaAtas[1], boxAngkaAtas[2], boxAngkaAtas[3], String(nilaiInputSetPoint) );     
+   if (nilaiInputJarakPoint != jarakPointRH)
+    box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+            boxAngkaBwh[0], boxAngkaBwh[1], boxAngkaBwh[2], boxAngkaBwh[3], String(nilaiInputJarakPoint)); 
+                  
+   setPointRH = nilaiInputSetPoint;
+   jarakPointRH = nilaiInputJarakPoint;
+   //Serial.println(page);
+ }
+ else if (page == 3) // step
+ {
+   if (nilaiInputSuhu != entrySuhu[langkahSet])
+    box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+            boxAngkaBwh[0], boxAngkaBwh[1], boxAngkaBwh[2], boxAngkaBwh[3], String(nilaiInputSuhu));     
+                  
+   entrySuhu[langkahSet] = nilaiInputSuhu;
+   //Serial.println(page);
+ }
+}
+
+void checkInputan()
+{
+  if (true)
+  {
+   if (myTouch.dataAvailable())
+   {
+     myTouch.read();
+     x = myTouch.getX();
+     y = myTouch.getY();
+     
+    // Serial.print("x :"); Serial.println(x);
+    // Serial.print("y :"); Serial.println(y);
+     
+     if (page == 0) page0Input(); // utama
+     else if (page == 1) page1Input(); //menu step
+     else if (page == 2) page2Input(); //rh
+     else if (page == 3) page3Input(); //step
+   }
+  }
+}
+
+void page0Input()
+{
+   //boxHome
+   if ((x >= boxHome[0]) && (x <= boxHome[2]) && (y >= boxHome[1]) && (y <= boxHome[3]))
+   {
+    page = 0;
+    oldDhtC = 0;
+    oldRealHum = 0;
+    for (int i=0; i<=8; i++) oldDigital[i] = LOW;
+    initLCD();
+    bacaEEPROM();
+    menuBawah();
+    menuKanan();
+   }
+
+   //boxTest
+   if ((x >= boxTest[0]) && (x <= boxTest[2]) && (y >= boxTest[1]) && (y <= boxTest[3]))
+   {
+     boxSmallFont(VGA_WHITE, VGA_BLACK, VGA_YELLOW, 
+                boxTest[0], boxTest[1], boxTest[2], boxTest[3], "TEST"); 
+     
+     checkSystem(); 
+     boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxTest[0], boxTest[1], boxTest[2], boxTest[3], "TEST");
+     for (int i=0; i<=8; i++) oldDigital[i] = LOW; 
+   }
+   
+   //boxStep
+   if ((x >= boxTest[0]) && (x <= boxTest[2]) && (y >= 5) && (y <= boxTest[1]))
+   {
+      page1LCD();  
+   }   
+}
+
+void page1LCD()
+{
+  //menu page 1 utk tombol setting
+      page = 1;
+      myGLCD.clrScr();
+
+      int y1 = box2Step[1], y2 = box2Step[3], pjgx = box2Step[2] - box2TextStep[0], pengali = 0;
+      boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                      box2Step[0]+((pjgx+5)*3), y1, box2Step[2]+((pjgx+5)*3), y2, String(setPointRH) ); 
+      boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                      box2TextStep[0]+((pjgx+5)*3), y1, box2TextStep[2]+((pjgx+5)*3), y2, "RH"); 
+    
+      for (int iz=1; iz<= 15; iz++)
+      {
+        
+        boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                     box2Step[0]+((pjgx+5)*pengali), y1, box2Step[2]+((pjgx+5)*pengali), y2, String(entrySuhu[iz]) ); 
+        boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                      box2TextStep[0]+((pjgx+5)*pengali), y1, box2TextStep[2]+((pjgx+5)*pengali), y2, "S"+String(iz)); 
+
+        y1 -= tinggiBoxStep2;
+        y2 -= tinggiBoxStep2;
+        
+        if ((iz % 5) == 0) 
+        {
+           pengali ++;
+           y1 = box2Step[1], y2 = box2Step[3];
+           
+        }
+        
+      }
+  
+      menuBawah();
+ 
+  
+}
+
+void page1Input()
+{
+   
+   //boxStep
+   int y1 = box2Step[1], y2 = box2Step[3], pjgx = box2Step[2] - box2TextStep[0], pengali = 0;
+
+     if ((x >= box2TextStep[0] + ((pjgx +5) * 3)) && (x <= box2Step[2]+ ((pjgx +5) * 3)) 
+         && (y >= y1) && (y <= y2))
+     { 
+        page = 2;
+        nilaiInputSetPoint = setPointRH;
+        nilaiInputJarakPoint = jarakPointRH;
+        myGLCD.clrScr();
+        box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                  boxAngkaAtas[0], boxAngkaAtas[1], boxAngkaAtas[2], boxAngkaAtas[3], String(setPointRH) );     
+        box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                  boxAngkaBwh[0], boxAngkaBwh[1], boxAngkaBwh[2], boxAngkaBwh[3], String(jarakPointRH)); 
+        
+        boxUbuntuFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                  boxPlusAtas[0], boxPlusAtas[1], boxPlusAtas[2], boxPlusAtas[3], "+" );     
+        boxUbuntuFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                  boxMinAtas[0], boxMinAtas[1], boxMinAtas[2], boxMinAtas[3], "-" );     
+        boxUbuntuFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                  boxPlusBwh[0], boxPlusBwh[1], boxPlusBwh[2], boxPlusBwh[3], "+" );     
+        boxUbuntuFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                  boxMinBwh[0], boxMinBwh[1], boxMinBwh[2], boxMinBwh[3], "-");     
+        menuBawah();
+      }  
+
+
+   for (int i=1; i<= 15; i++)
+   {
+     if ((x >= box2TextStep[0] + ((pjgx +5) * pengali)) && (x <= box2Step[2]+ ((pjgx +5) * pengali)) 
+         && (y >= y1) && (y <= y2))
+     { 
+               page = 3;
+               langkahSet = i;
+               nilaiInputSuhu = entrySuhu[langkahSet];
+               myGLCD.clrScr();
+               box7SegFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                       boxAngkaBwh[0], boxAngkaBwh[1], boxAngkaBwh[2], boxAngkaBwh[3], String(entrySuhu[langkahSet]) );     
+               boxUbuntuFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                          boxPlusBwh[0], boxPlusBwh[1], boxPlusBwh[2], boxPlusBwh[3], "+");     
+               boxUbuntuFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                          boxMinBwh[0], boxMinBwh[1], boxMinBwh[2], boxMinBwh[3], "-");     
+               menuBawah();
+     }
+      y1 -= tinggiBoxStep2;
+      y2 -= tinggiBoxStep2;
+
+        if ((i % 5) == 0) 
+        {
+           pengali ++;
+           y1 = box2Step[1], y2 = box2Step[3];
+           
+        }
+     
+     
+   }
+
+   //boxHome
+   if ((x >= boxHome[0]) && (x <= boxHome[2]) && (y >= boxHome[1]) && (y <= boxHome[3]))
+   {
+    page = 0;
+    oldDhtC = 0;
+    oldRealHum = 0;
+    for (int i=0; i<=jmlStep; i++) oldDigital[i] = LOW;
+    initLCD();
+    bacaEEPROM();
+    menuBawah();
+    menuKanan();
+   }
+  
+}
+
+
+void page2Input()  //RH Input
+{
+   //boxHome
+   if ((x >= boxHome[0]) && (x <= boxHome[2]) && (y >= boxHome[1]) && (y <= boxHome[3]))
+   {
+    page = 0;
+    oldDhtC = 0;
+    oldRealHum = 0;
+    for (int i=0; i<=jmlStep; i++) oldDigital[i] = LOW;
+    initLCD();
+    bacaEEPROM();
+    menuBawah();
+    menuKanan();
+   }
+   
+   //boxSave
+   if ((x >= boxSave[0]) && (x <= boxSave[2]) && (y >= boxSave[1]) && (y <= boxSave[3]))
+   {
+    boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_RED, 
+                boxHome[2], boxSave[1], boxSave[0], boxSave[3], "Saving..."); 
+//                boxHome[2], boxHome[1], boxSave[0], boxHome[3], "STEP "+String(langkahSet)); 
+     
+     EEPROM.write(81, nilaiInputSetPoint);
+     EEPROM.write(82, nilaiInputJarakPoint);
+     delay(500);
+     menuBawah();
+   }
+
+   //boxCancel
+   if ((x >= boxCancel[0]) && (x <= boxCancel[2]) && (y >= boxCancel[1]) && (y <= boxCancel[3]))
+   {
+      bacaEEPROM();
+      nilaiInputSetPoint = setPointRH;
+      nilaiInputJarakPoint = jarakPointRH;
+      page = 1;
+      page1LCD();
+      delay(500);
+  }
+
+   //boxPlusAtas
+   if ((x >= boxPlusAtas[0]) && (x <= boxPlusAtas[2]) && (y >= boxPlusAtas[1]) && (y <= boxPlusAtas[3]))
+   {
+      nilaiInputSetPoint ++;
+      if (nilaiInputSetPoint >100) nilaiInputSetPoint = 100;
+      delay(100);
+   }
+
+   //boxMinAtas
+   if ((x >= boxMinAtas[0]) && (x <= boxMinAtas[2]) && (y >= boxMinAtas[1]) && (y <= boxMinAtas[3]))
+   {
+     nilaiInputSetPoint --;
+       if (nilaiInputSetPoint < 0) nilaiInputJarakPoint = 0;
+     delay(100);
+   }
+   
+   //boxPlusBwh
+   if ((x >= boxPlusBwh[0]) && (x <= boxPlusBwh[2]) && (y >= boxPlusBwh[1]) && (y <= boxPlusBwh[3]))
+   {
+      nilaiInputJarakPoint ++;
+      if (nilaiInputJarakPoint >100) nilaiInputJarakPoint = 100;
+      delay(100);
+   }
+
+   //boxMinBwh
+   if ((x >= boxMinBwh[0]) && (x <= boxMinBwh[2]) && (y >= boxMinBwh[1]) && (y <= boxMinBwh[3]))
+   {
+     nilaiInputJarakPoint --;
+      if (nilaiInputJarakPoint < 0) nilaiInputJarakPoint = 0;
+      delay(100);
+   }
+}
+
+void page3Input()
+{
+   //boxHome
+   if ((x >= boxHome[0]) && (x <= boxHome[2]) && (y >= boxHome[1]) && (y <= boxHome[3]))
+   {
+    page = 0;
+    oldDhtC = 0;
+    oldRealHum = 0;
+    for (int i=1; i<=15; i++) oldDigital[i] = LOW;
+    initLCD();
+    bacaEEPROM();
+    menuBawah();
+    menuKanan();
+   }
+ 
+   //boxSave
+   if ((x >= boxSave[0]) && (x <= boxSave[2]) && (y >= boxSave[1]) && (y <= boxSave[3]))
+   {
+     boxSmallFont(VGA_WHITE, VGA_BLUE, VGA_YELLOW, 
+                boxHome[2], boxHome[1], boxSave[0], boxHome[3], "Saving..."); 
+     //           boxSave[0]-50, boxSave[1], boxSave[2]-50, boxSave[3], "Saving..."); 
+     //           boxHome[2], boxHome[1], boxSave[0], boxHome[3], "STEP "+String(langkahSet)); 
+     
+     EEPROM.write(21+langkahSet, nilaiInputSuhu);
+     delay(500);
+     menuBawah();
+   }
+
+   //boxCancel
+   if ((x >= boxCancel[0]) && (x <= boxCancel[2]) && (y >= boxCancel[1]) && (y <= boxCancel[3]))
+   {
+      bacaEEPROM();
+      nilaiInputSuhu = entrySuhu[langkahSet];
+      page = 1;
+      page1LCD();
+      delay(500);
+   }
+
+   //boxPlusBwh
+   if ((x >= boxPlusBwh[0]) && (x <= boxPlusBwh[2]) && (y >= boxPlusBwh[1]) && (y <= boxPlusBwh[3]))
+   {
+      nilaiInputSuhu ++;
+      if (nilaiInputSuhu > 100) nilaiInputSuhu = 100;
+      delay(100);
+   }
+
+   //boxMinBwh
+   if ((x >= boxMinBwh[0]) && (x <= boxMinBwh[2]) && (y >= boxMinBwh[1]) && (y <= boxMinBwh[3]))
+   {
+     nilaiInputSuhu --;
+      if (nilaiInputSuhu < 0) nilaiInputSuhu = 0;
+      delay(100);
+   }
+   
+}
+
+
+void checkKondisi()
+{
+  // suhu
+  for (int i=1; i<=15; i++)
+  {
+   if (entrySuhu[i] == 0) { digitalWrite(steps[i], LOW); }
+   else
+   {
+    if (entrySuhu[i] <= TempDhtC) 
+       { digitalWrite(steps[i], HIGH); }
+    else  
+       { digitalWrite(steps[i], LOW); }
+   }
+  }  
+  
+  // RH
+  if (RealHum <=  setPointRH + jarakPointRH) 
+       { digitalWrite(steps[0], HIGH);}
+  if (RealHum >=  setPointRH + jarakPointRH)
+       { digitalWrite(steps[0], LOW);}
+}
+
+
+void checkDigital()
+{
+ if (page ==0)
+ {
+  int y1 = box1Step[1], y2 = box1Step[3];
+
+  for (int i=0; i<= 15; i++)
+  {
+    if (digitalRead(steps[i]) == HIGH)
+    {
+      if (i == 0)
+      {
+        if (oldDigital[i] == LOW)
+            boxSmallFont(VGA_BLACK, VGA_YELLOW, VGA_BLUE, 
+                         box1Step[0], y1, box1Step[2], y2, String(setPointRH) ); 
+        oldDigital[i] = HIGH;
+      }
+      else
+      {
+        y1 -= tinggiBoxStep;
+        y2 -= tinggiBoxStep;
+        
+        if (oldDigital[i] == LOW)
+          boxSmallFont(VGA_BLACK, VGA_YELLOW, VGA_BLUE, 
+                     box1Step[0], y1, box1Step[2], y2, String(entrySuhu[i]) ); 
+       oldDigital[i] = HIGH; 
+      }
+    }
+    else if (digitalRead(steps[i]) == LOW)
+    {
+      if (i == 0)
+      {
+        if (oldDigital[i] == HIGH)
+            boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                        box1Step[0], y1, box1Step[2], y2, String(setPointRH) ); 
+        oldDigital[i] = LOW;                
+      }
+      else
+      {
+        y1 -= tinggiBoxStep;
+        y2 -= tinggiBoxStep;
+        
+        if (oldDigital[i] == HIGH)
+            boxSmallFont(VGA_BLACK, VGA_WHITE, VGA_BLUE, 
+                   box1Step[0], y1, box1Step[2], y2, String(entrySuhu[i]) ); 
+        oldDigital[i] = LOW; 
+      }
+    }
+  }
+ } // end page
+}
+
+void boxSmallFont(word warnaGaris, word warnaBack, word warnaFont, 
+    int x1, int y1, int x2, int y2, String tulisan)
+{
+  myGLCD.setFont(SmallFont);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);
+  myGLCD.setColor(warnaBack);
+  myGLCD.fillRoundRect(x1+1, y1+1, x2-1, y2-1);
+  myGLCD.setBackColor(warnaBack);
+  myGLCD.setColor(warnaFont);
+  myGLCD.print(tulisan, (x1 + ((x2-x1)-(tulisan.length()*8))/2), y1 + ((y2-y1-12)/2));
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2); 
+}
+
+void boxBigFont(word warnaGaris, word warnaBack, word warnaFont, 
+    int x1, int y1, int x2, int y2, String tulisan)
+{
+  myGLCD.setFont(BigFont);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);
+  myGLCD.setColor(warnaBack);
+  myGLCD.fillRoundRect(x1+1, y1+1, x2-1, y2-1);
+  myGLCD.setBackColor(warnaBack);
+  myGLCD.setColor(warnaFont);
+  myGLCD.print(tulisan, x1 + 5, y1 + 10);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);  
+}
+
+void boxXXXFont(word warnaGaris, word warnaBack, word warnaFont, 
+    int x1, int y1, int x2, int y2, String tulisan)
+{
+  myGLCD.setFont(SevenSeg_XXXL_Num);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);
+  myGLCD.setColor(warnaBack);
+  myGLCD.fillRoundRect(x1+1, y1+1, x2-1, y2-1);
+  myGLCD.setBackColor(warnaBack);
+  myGLCD.setColor(warnaFont);
+  myGLCD.print(tulisan, x1 + 5, y1 + 10);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);  
+}
+
+void box7SegFont(word warnaGaris, word warnaBack, word warnaFont, 
+    int x1, int y1, int x2, int y2, String tulisan)
+{
+  myGLCD.setFont(SevenSegmentFull);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);
+  myGLCD.setColor(warnaBack);
+  myGLCD.fillRoundRect(x1+1, y1+1, x2-1, y2-1);
+  myGLCD.setBackColor(warnaBack);
+  myGLCD.setColor(warnaFont);
+  myGLCD.print(tulisan, (x1 + ((x2-x1)-(tulisan.length()*32))/2), y1 + ((y2-y1-50)/2));
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);  
+}
+
+void boxUbuntuFont(word warnaGaris, word warnaBack, word warnaFont, 
+    int x1, int y1, int x2, int y2, String tulisan)
+{
+  myGLCD.setFont(UbuntuBold);
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);
+  myGLCD.setColor(warnaBack);
+  myGLCD.fillRoundRect(x1+1, y1+1, x2-1, y2-1);
+  myGLCD.setBackColor(warnaBack);
+  myGLCD.setColor(warnaFont);
+  myGLCD.print(tulisan, (x1 + ((x2-x1)-(tulisan.length()*24))/2), y1 + ((y2-y1-32)/2));
+  myGLCD.setColor(warnaGaris);
+  myGLCD.drawRoundRect(x1, y1, x2, y2);  
+}
